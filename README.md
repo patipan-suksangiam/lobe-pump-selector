@@ -6,8 +6,20 @@ Excel-based rotary lobe pump selector (originally **WFT / Wright Flow Technologi
 
 | File | Description |
 |---|---|
-| `wft-selector-lobe-revolution.xlsx` | The selector workbook |
+| `wft-selector-lobe-revolution.xlsx` | The original Excel selector + auto **Datasheet** sheet |
+| `lobe-pump-selector.html` | **Standalone HTML version** (React, single file — open in any browser) |
+| `engine.js` | The calculation engine (JS port of the Excel logic; shared by the HTML app) |
+| `lobe-pump-selector.template.html` + `build_html.py` | Rebuild the HTML app from template + engine |
 | `build_datasheet.py` | Rebuilds the `Datasheet` sheet via direct OOXML zip surgery |
+
+### HTML app (`lobe-pump-selector.html`)
+
+Works offline from the file (needs internet once for CDN React/Tailwind). Mirrors the Excel selector 1:1:
+
+- Enter duty: flow / pressure / viscosity (incl. SSU) / improved surface finish, any unit
+- Results table for **Standard / 70°C** and **Hot / 150°C** rotor classes: RPM, power, torque, NPSHr, tip speed, validity, ★ recommended (smallest size meeting the duty)
+- Click a valid size → printable **datasheet** (A4 landscape, product info from [vikingpump.com/hygienic](https://www.vikingpump.com/hygienic))
+- Engine verified against the Excel calc (LibreOffice recalc) for metric + US units, both classes
 
 ### Workbook sheets
 

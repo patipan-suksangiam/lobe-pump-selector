@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Revolution RLP — Hygienic Rotary Lobe Pump Selector</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#0d1117; color:#e6edf3; font-family: 'Segoe UI', Roboto, Arial, sans-serif; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:12px; }
+  .inp { background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:8px 10px; color:#e6edf3; width:100%; outline:none; }
+  .inp:focus { border-color:#2E75B6; }
+  select.inp { cursor:pointer; }
+  .btn { background:#1F4E79; color:#fff; border-radius:8px; padding:8px 14px; font-weight:600; cursor:pointer; border:1px solid #2E75B6; }
+  .btn:hover { background:#2E75B6; }
+  .btn.active { background:#2E75B6; box-shadow:0 0 0 1px #58a6ff; }
+  table.res { width:100%; border-collapse:collapse; font-size:13px; }
+  table.res th { background:#1F4E79; color:#fff; padding:8px 6px; text-align:right; font-weight:600; position:sticky; top:0; }
+  table.res th:first-child, table.res td:first-child { text-align:left; }
+  table.res td { padding:7px 6px; border-bottom:1px solid #21262d; text-align:right; white-space:nowrap; }
+  table.res tr.clickable { cursor:pointer; }
+  table.res tr.clickable:hover td { background:#1c2333; }
+  table.res tr.sel td { background:#12263a; }
+  table.res tr.rec td { border-left:3px solid #3fb950; }
+  table.res tr.na td { color:#6e7681; }
+  .badge-rec { background:#238636; color:#fff; border-radius:99px; font-size:10px; padding:1px 8px; font-weight:700; }
+  .unit { color:#8b949e; font-size:11px; }
+  .sec { background:#1F4E79; color:#fff; font-weight:700; font-size:13px; padding:6px 10px; border-radius:6px; letter-spacing:.5px; }
+  .lbl { color:#8b949e; font-size:12px; }
+  .val { font-size:15px; font-weight:600; }
+  .foot { color:#6e7681; font-size:11px; }
+  .tagline { color:#8b949e; font-style:italic; font-size:12px; }
+
+  /* datasheet: white paper on screen, only content in print */
+  .ds { background:#fff; color:#000; padding:22px; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,.4); }
+  .ds input.inp { background:#fff; color:#000; border:1px solid #999; border-radius:4px; padding:4px 6px; }
+  @media print {
+    body { background:#fff; }
+    .app { display:none !important; }
+    .ds { display:block !important; box-shadow:none; padding:0; border-radius:0; }
+    @page { size: A4 landscape; margin: 10mm; }
+  }
+  .ds table { width:100%; border-collapse:collapse; }
+  .ds td { padding:5px 8px; font-size:12px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+/*__RLP_ENGINE__*/
+
+const RLP = window.RLPEngine;
+
+const UNITS = {
+  flow: ['l/m','m³/hr','usgpm','gpm','l/s','l/hr'],
+  pres: ['Bar','psi','kPa','MPa'],
+  visc: ['cP','Pas','mPas','SSU'],
+};
+
+const clsLabel = cls => cls === 'hot' ? 'Hot / 150°C' : 'Standard / 70°C';
+const tempLimit = cls => cls === 'hot' ? 'Hot / 150°C (300°F)' : 'Standard / 70°C (160°F)';
+
+const f = (v, d) => (v === null || v === undefined || Number.isNaN(v)) ? '—' : Number(v).toFixed(d);
+
+function Input({ label, value, onChange, unit, onUnit, units, step }) {
+  return (
+    <div className="flex items-end gap-2">
+      <div className="flex-1">
+        <div className="lbl mb-1">{label}</div>
+        <input type="number" className="inp" value={value} step={step||'any'}
+               onChange={e => onChange(e.target.value)} />
+      </div>
+      <div style={{width:110}}>
+        <div className="lbl mb-1">&nbsp;</div>
+        <select className="inp" value={unit} onChange={e => onUnit(e.target.value)}>
+          {units.map(u => <option key={u} value={u}>{u}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [flow, setFlow] = React.useState('10');
+  const [flowUnit, setFlowUnit] = React.useState('l/m');
+  const [pres, setPres] = React.useState('1');
+  const [presUnit, setPresUnit] = React.useState('Bar');
+  const [visc, setVisc] = React.useState('1');
+  const [viscUnit, setViscUnit] = React.useState('cP');
+  const [isf, setIsf] = React.useState(false);
+  const [cls, setCls] = React.useState('std');
+  const [sel, setSel] = React.useState(null);
+  const [cust, setCust] = React.useState('');
+  const [proj, setProj] = React.useState('');
+  const [prep, setPrep] = React.useState('');
+
+  const inputs = { flow: parseFloat(flow)||0, flowUnit, pres: parseFloat(pres)||0, presUnit,
+                   visc: parseFloat(visc)||0, viscUnit, isf };
+  const res = React.useMemo(() => RLP.calcAll(inputs), [flow, flowUnit, pres, presUnit, visc, viscUnit, isf]);
+  const rows = cls === 'hot' ? res.hot : res.std;
+  const selRow = sel ? rows.find(r => r.size === sel) || null : null;
+  const hp = res.env.hpUnits;
+
+  const pUnit = hp ? 'HP' : 'kW', tUnit = hp ? 'lb-ft' : 'Nm', nUnit = hp ? 'ft' : 'm';
+  const dateStr = new Date().toLocaleDateString('en-GB');
+
+  function select(size) { setSel(sel === size ? null : size); }
+
+  return (
+  <>
+  <div className="app max-w-7xl mx-auto p-5">
+    {/* header */}
+    <div className="card p-6 mb-5" style={{background:'linear-gradient(135deg,#1F4E79 0%,#12263a 100%)'}}>
+      <div style={{fontSize:26,fontWeight:800,letterSpacing:1}}>VIKING PUMP HYGIENIC</div>
+      <div style={{fontSize:17,fontWeight:600,marginTop:2}}>REVOLUTION® RLP SERIES — Hygienic Rotary Lobe Pump Selector</div>
+      <div className="tagline mt-1">Formerly Wright Flow Technologies (WFT) &nbsp;•&nbsp; vikingpump.com/hygienic</div>
+    </div>
+
+    {/* inputs */}
+    <div className="card p-5 mb-5">
+      <div className="sec mb-4">1 &nbsp;•&nbsp; APPLICATION / DUTY</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Input label="Flowrate" value={flow} onChange={setFlow} unit={flowUnit} onUnit={setFlowUnit} units={UNITS.flow}/>
+        <Input label="Pressure" value={pres} onChange={setPres} unit={presUnit} onUnit={setPresUnit} units={UNITS.pres}/>
+        <Input label="Viscosity" value={visc} onChange={setVisc} unit={viscUnit} onUnit={setViscUnit} units={UNITS.visc}/>
+        <div>
+          <div className="lbl mb-1">Improved Surface Finish</div>
+          <div className="flex gap-2">
+            <button className={"btn flex-1 " + (!isf?'active':'')} onClick={() => setIsf(false)}>No</button>
+            <button className={"btn flex-1 " + (isf?'active':'')} onClick={() => setIsf(true)}>Yes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* results */}
+    <div className="card p-5 mb-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="sec">2 &nbsp;•&nbsp; SELECTION RESULTS</div>
+        <div className="flex gap-2">
+          <button className={"btn " + (cls==='std'?'active':'')} onClick={() => setCls('std')}>Standard / 70°C</button>
+          <button className={"btn " + (cls==='hot'?'active':'')} onClick={() => setCls('hot')}>Hot / 150°C</button>
+        </div>
+      </div>
+      {res.recommended && <div className="mb-3 foot">★ Recommended (auto): <b style={{color:'#3fb950'}}>{res.recommended}</b> — smallest size meeting the duty (Standard class)</div>}
+      <div style={{maxHeight:430, overflow:'auto'}}>
+      <table className="res">
+        <thead><tr>
+          <th>Size</th><th>Disp<br/><span className="unit">l/rev</span></th><th>Port<br/><span className="unit">in (mm)</span></th>
+          <th>RPM</th><th>Power<br/><span className="unit">{pUnit}</span></th><th>Torque<br/><span className="unit">{tUnit}</span></th>
+          <th>NPSHr<br/><span className="unit">{nUnit}</span></th><th>Tip Speed<br/><span className="unit">m/s</span></th>
+          <th>Max RPM</th><th>Max Bar</th><th></th>
+        </tr></thead>
+        <tbody>
+        {rows.map(r => {
+          const rec = r.size === res.recommended;
+          const isSel = r.size === sel;
+          return (
+            <tr key={r.size} className={"clickable " + (r.ok?'':'na ') + (rec?'rec ':'') + (isSel?'sel':'')} onClick={() => r.ok && select(r.size)}
+                title={r.ok ? 'Click to build datasheet' : r.reason}>
+              <td><b>{r.size}</b>{rec && <span className="badge-rec ml-1">★ REC</span>}</td>
+              <td>{f(r.disp,3)}</td>
+              <td>{r.portIn} <span className="unit">({r.portMm})</span></td>
+              <td>{r.ok ? f(r.rpm,0) : '—'}</td>
+              <td>{r.ok ? f(r.power,2) : '—'}</td>
+              <td>{r.ok ? f(r.torque,2) : '—'}</td>
+              <td>{r.ok ? f(r.npshr,2) : '—'}</td>
+              <td>{r.ok ? f(r.tip,2) : '—'}</td>
+              <td>{r.maxSpeed}</td>
+              <td>{r.maxPres}</td>
+              <td>{r.ok ? (isSel ? '✓' : '') : '✕'}</td>
+            </tr>
+          );
+        })}
+        </tbody>
+      </table>
+      </div>
+      {!res.recommended && <div className="mt-3" style={{color:'#f0883e'}}>⚠ No pump size meets this duty — check flow / pressure / viscosity.</div>}
+    </div>
+
+    {/* datasheet */}
+    <div className="card p-5 mb-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="sec">3 &nbsp;•&nbsp; PUMP DATASHEET {sel && <span style={{fontWeight:400}}>— {sel} / {clsLabel(cls)}</span>}</div>
+        {selRow && <button className="btn" onClick={() => window.print()}>🖨 Print Datasheet</button>}
+      </div>
+      {!selRow ? (
+        <div className="foot">Click a valid pump row above to build its datasheet. Recommended: <b style={{color:'#3fb950'}}>{res.recommended||'—'}</b></div>
+      ) : (
+        <Datasheet row={selRow} cls={cls} env={res.env} hp={hp}
+                   cust={cust} setCust={setCust} proj={proj} setProj={setProj}
+                   prep={prep} setPrep={setPrep} dateStr={dateStr}/>
+      )}
+    </div>
+
+    <div className="foot text-center pb-4">
+      Values auto-calculated per the WFT “Revolution RLP” selector (Issue C.10/13). Confirm final selection with Viking Pump Hygienic Ltd.
+      <br/>Product, option & certification data: vikingpump.com/hygienic — 3-A SSI • CE (2006/42/EC) • ATEX. Made in Cedar Falls, Iowa, USA & Eastbourne, UK.
+    </div>
+  </div>
+  {selRow && (
+    <div className="ds max-w-7xl mx-auto mb-8">
+      <Datasheet row={selRow} cls={cls} env={res.env} hp={hp}
+                 cust={cust} setCust={setCust} proj={proj} setProj={setProj}
+                 prep={prep} setPrep={setPrep} dateStr={dateStr}/>
+    </div>
+  )}
+  </>
+  );
+}
+
+function Row({l, v, u}) {
+  return (
+    <tr>
+      <td style={{color:'#57606a',width:'38%'}}>{l}</td>
+      <td style={{fontWeight:700}}>{v}</td>
+      <td style={{color:'#57606a'}}>{u}</td>
+    </tr>
+  );
+}
+
+function Datasheet({ row, cls, env, hp, cust, setCust, proj, setProj, prep, setPrep, dateStr }) {
+  const pUnit = hp ? 'HP' : 'kW', tUnit = hp ? 'lb-ft' : 'Nm', nUnit = hp ? 'ft' : 'm';
+  return (
+    <table>
+        <tr><td colSpan="3" style={{background:'#1F4E79',color:'#fff',fontSize:20,fontWeight:800}}>VIKING PUMP HYGIENIC</td></tr>
+        <tr><td colSpan="3" style={{background:'#1F4E79',color:'#fff',fontWeight:600}}>REVOLUTION® RLP SERIES — HYGIENIC ROTARY LOBE PUMP</td></tr>
+        <tr><td colSpan="3" style={{background:'#eaeaea',fontStyle:'italic',fontSize:11}}>Formerly Wright Flow Technologies (WFT) &nbsp;•&nbsp; Source: vikingpump.com/hygienic</td></tr>
+        <tr><td colSpan="3" style={{background:'#2E75B6',color:'#fff',fontWeight:700}}>1 • APPLICATION / DUTY</td></tr>
+        <tr>
+          <td>Customer <input className="inp" style={{background:'#fff',color:'#000',border:'1px solid #999'}} value={cust} onChange={e=>setCust(e.target.value)}/></td>
+          <td>Project / Ref <input className="inp" style={{background:'#fff',color:'#000',border:'1px solid #999'}} value={proj} onChange={e=>setProj(e.target.value)}/></td>
+          <td>Date: <b>{dateStr}</b></td>
+        </tr>
+        <tr>
+          <td>Prepared by <input className="inp" style={{background:'#fff',color:'#000',border:'1px solid #999'}} value={prep} onChange={e=>setPrep(e.target.value)}/></td>
+          <td>Flowrate: <b>{env.flow} {env.flowUnit}</b></td>
+          <td>Pressure: <b>{env.bar} Bar</b></td>
+        </tr>
+        <tr><td colSpan="3" style={{background:'#2E75B6',color:'#fff',fontWeight:700}}>2 • SELECTED PUMP</td></tr>
+        <Row l="Pump Size" v={row.size}/>
+        <Row l="Rotor Class / Temperature Limit" v={tempLimit(cls)}/>
+        <tr><td colSpan="3" style={{background:'#2E75B6',color:'#fff',fontWeight:700}}>3 • PERFORMANCE AT DUTY</td></tr>
+        <Row l="Pump Speed" v={f(row.rpm,0)} u="rpm"/>
+        <Row l="Power Required" v={f(row.power,2)} u={pUnit}/>
+        <Row l="Torque Required" v={f(row.torque,2)} u={tUnit}/>
+        <Row l="NPSHr" v={f(row.npshr,2)} u={nUnit}/>
+        <Row l="Tip Speed" v={f(row.tip,2)} u="m/s"/>
+        <Row l="Max Speed" v={row.maxSpeed} u="rpm"/>
+        <Row l="Possible Flow Variation" v={f(row.flowVar,1)} u={env.flowUnit+' ±'}/>
+        <Row l="Possible Speed Variation" v={f(row.speedVar,0)} u="rpm ±"/>
+        <tr><td colSpan="3" style={{background:'#2E75B6',color:'#fff',fontWeight:700}}>4 • PUMP SPECIFICATIONS</td></tr>
+        <Row l="Displacement" v={f(row.disp,3)} u="l/rev"/>
+        <Row l="Port Size" v={row.portIn} u={'in ('+row.portMm+' mm)'}/>
+        <Row l="Nominal Rotor Diameter" v={row.rotorDia} u="mm"/>
+        <Row l="Max Pressure" v={f(row.maxPres,1)} u="Bar"/>
+        <Row l="Max Shaft Torque" v={row.maxTorque} u="Nm"/>
+        <tr><td colSpan="3" style={{fontSize:11,color:'#333'}}>Series capacity: to 399 GPM (91 m³/h) • to 450 PSI (31 Bar) • to 300°F (150°C) • to 2,000,000 SSU (440,000 cSt)</td></tr>
+        <tr><td colSpan="3" style={{background:'#2E75B6',color:'#fff',fontWeight:700}}>5 • OPTIONS &amp; FEATURES</td></tr>
+        <tr><td colSpan="3" style={{fontSize:11}}>• CIP (Clean-In-Place) standard — self-draining head, cusp reliefs, dynamic seal leak path, no dead zones</td></tr>
+        <tr><td colSpan="3" style={{fontSize:11}}>• Porting — Hygienic: Tri-clamp, DIN 11864, DIN 11851 Male, SMS Male • Industrial: ASA/ANSI 150/300 lb RF, DIN 2633, BSP Male, NPT Male • Jackets available</td></tr>
+        <tr><td colSpan="3" style={{fontSize:11}}>• Sealing — Single or Double Mechanical (with flush), Single or Double O-ring on replaceable sleeve; complete range of material options</td></tr>
+        <tr><td colSpan="3" style={{fontSize:11}}>• Drives: purchased gear reducer • Mounting: foot mount • Front-loading seal changes &amp; front access shimming</td></tr>
+        <tr><td colSpan="3" style={{background:'#2E75B6',color:'#fff',fontWeight:700}}>6 • CERTIFICATIONS &amp; MANUFACTURING</td></tr>
+        <tr><td colSpan="3" style={{fontSize:11}}>• 3-A Sanitary Standards (3-A SSI) &nbsp;•&nbsp; CE — Machinery Directive 2006/42/EC &nbsp;•&nbsp; ATEX (EX)</td></tr>
+        <tr><td colSpan="3" style={{fontSize:11}}>• Manufactured in Cedar Falls, Iowa, USA &amp; Eastbourne, UK — Viking Pump Hygienic Ltd. (formerly Wright Flow Technologies)</td></tr>
+        <tr><td colSpan="3" style={{fontSize:9,color:'#666',fontStyle:'italic'}}>Generated by the WFT Lobe Pump Selector — values auto-calculated from the duty entered above. Confirm the final selection with Viking Pump Hygienic Ltd. • vikingpump.com/hygienic</td></tr>
+      </table>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

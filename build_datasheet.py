@@ -110,8 +110,10 @@ RLP = "'Revolution RLP'"
 def perf_std(row):
     return "IFERROR(INDEX(%s!$E$%d:$S$%d,MATCH($B$13,%s!$E$20:$S$20,0)),\"N/A\")" % (RLP, row, row, RLP)
 def perf_hot(row):
+    # hot-class block rows are Std row + 12 (25->37, 26->38, 27->39, 28->40)
+    hot = row + 12
     return ("IF(OR($B$13=\"0035X\",$B$13=\"0065X\"),\"N/A\","
-            "IFERROR(INDEX(%s!$E$%d:$S$%d,MATCH($B$13,%s!$E$20:$S$20,0)),\"N/A\"))" % (RLP, row, row, RLP))
+            "IFERROR(INDEX(%s!$E$%d:$S$%d,MATCH($B$13,%s!$E$20:$S$20,0)),\"N/A\"))" % (RLP, hot, hot, RLP))
 def perf(row):
     return 'IF($E$12="Hot / 150°C",%s,%s)' % (perf_hot(row), perf_std(row))
 def phys(row):
