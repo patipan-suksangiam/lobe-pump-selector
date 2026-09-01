@@ -1,42 +1,32 @@
-# Lobe Pump Selector — WFT / Viking Pump Hygienic (Revolution RLP)
+# Lobe Pump Selector — WFT / Viking Pump Hygienic
 
-Excel-based rotary lobe pump selector (originally **WFT / Wright Flow Technologies**, now **Viking Pump Hygienic**) with an added auto **Datasheet** sheet.
+Excel-based hygienic pump selector (originally **WFT / Wright Flow Technologies**, now **Viking Pump Hygienic**) with a standalone **HTML version** covering all 6 series.
+
+## Series
+| Series | Type | Sizes | Rotor classes |
+|---|---|---|---|
+| Revolution RLP | Rotary Lobe | 15 | Std 70°C / Hot 150°C |
+| Revolution CPP | Circumferential Piston | 16 | Std 93°C / FF 105°C / Hot 150°C / Choc |
+| MP-CP | Multi-Purpose CP | 12 | A 70°C / B 100°C / C 150°C |
+| Sterilobe | Rotary Lobe | 14 | BiWing / Multilobe |
+| RTP | Rotary Lobe | 4 | Standard |
+| Acculobe | Rotary Lobe | 2 (Lobe/Wing) | Standard (+dual-port NPSHr) |
 
 ## Files
+- `wft-selector-lobe-revolution.xlsx` — original Excel selector + auto **Datasheet** sheet (Revolution RLP)
+- `lobe-pump-selector.html` — **standalone HTML version** (open in any browser; CDN React/Tailwind on first load)
+- `engine.js` — the 6-series calculation engine (ported 1:1 from the Excel formulas, incl. source quirks)
+- `build_html.py` + `lobe-pump-selector.template.html` — rebuild the HTML from template + engine
+- `build_datasheet.py` — adds the Datasheet sheet to the xlsx via direct OOXML zip surgery
 
-| File | Description |
-|---|---|
-| `wft-selector-lobe-revolution.xlsx` | The original Excel selector + auto **Datasheet** sheet |
-| `lobe-pump-selector.html` | **Standalone HTML version** (React, single file — open in any browser) |
-| `engine.js` | The calculation engine (JS port of the Excel logic; shared by the HTML app) |
-| `lobe-pump-selector.template.html` + `build_html.py` | Rebuild the HTML app from template + engine |
-| `build_datasheet.py` | Rebuilds the `Datasheet` sheet via direct OOXML zip surgery |
-
-### HTML app (`lobe-pump-selector.html`)
-
-Works offline from the file (needs internet once for CDN React/Tailwind). Mirrors the Excel selector 1:1:
-
-- Enter duty: flow / pressure / viscosity (incl. SSU) / improved surface finish, any unit
-- Results table for **Standard / 70°C** and **Hot / 150°C** rotor classes: RPM, power, torque, NPSHr, tip speed, validity, ★ recommended (smallest size meeting the duty)
-- Click a valid size → printable **datasheet** (A4 landscape, product info from [vikingpump.com/hygienic](https://www.vikingpump.com/hygienic))
-- Engine verified against the Excel calc (LibreOffice recalc) for metric + US units, both classes
-
-### Workbook sheets
-
-- **`Revolution RLP`** — duty input (flowrate / pressure / viscosity / improved surface finish) + frame-by-frame results (RPM required, power, torque, NPSHr, slip, flow variation) for 17 pump sizes in two rotor classes.
-- **`Datasheet`** — one-page A4 landscape datasheet. Pick a pump size (17 sizes, or **★ Recommended (auto)** = smallest size that meets the duty) and rotor class (**Standard / 70°C** or **Hot / 150°C**). Duty point, performance and specifications pull live from the selector sheet:
-  - Performance: pump speed, power, torque, NPSHr, tip speed, flow/speed variation
-  - Specifications: displacement, port size (in/mm), rotor diameter, max speed/pressure, max shaft torque
-  - Product info per [vikingpump.com/hygienic](https://www.vikingpump.com/hygienic): CIP standard, porting & sealing options, 3-A SSI / CE / ATEX certifications, manufacturer (Viking Pump Hygienic Ltd., formerly Wright Flow Technologies)
-- **`Menu`** — cover page with a link to the Datasheet.
-
-## Why zip surgery?
-
-The workbook contains **1,284 embedded charts** and CMYK images. `openpyxl` cannot save this file (it drops the charts and crashes on the CMYK TIFF logo). `build_datasheet.py` therefore edits the OOXML parts **inside the zip in place** — every chart and image is preserved byte-for-byte.
+## Why zip surgery / why hand-ported formulas?
+- The xlsx contains **1,284 embedded charts + CMYK images** — `openpyxl` cannot save it; edits go through direct OOXML zip surgery.
+- The workbook's formulas are **per-column heterogeneous** (slip-polynomial thresholds/orders, viscosity-multiplier formulas, and even the multiplier application differ between sizes/columns — e.g. Sterilobe SLFL double-applies margin×vm in the low-pressure branch). Every engine was therefore **parsed from the actual cell formulas** and **verified against a LibreOffice forced-recalculation** of the workbook (608/610 checks exact-match; the 2 mismatches are stale junk cells in the source workbook).
+- MP-CP viscous-power uses `LOG10` (Excel `LOG`) with a per-size coefficient; CPP torque uses the Std-class rpm for every class and `$E$139` absolute refs; Acculobe's margin multiplies only the linear slip term — all source quirks preserved.
 
 ## Usage
-
-1. Open `wft-selector-lobe-revolution.xlsx` (Excel recalculates on open).
-2. Enter the duty on the `Revolution RLP` sheet.
-3. Open the **`Datasheet`** tab (link also on the Menu and under the frame table of the selector).
-4. Choose pump size + rotor class, fill in customer/project fields, print (A4 landscape, fits one page).
+1. Open `lobe-pump-selector.html` in a browser.
+2. Enter duty (flow/pressure/viscosity + units; ISF, Relief Valve, Flushed Seal per series).
+3. Pick a series tab + rotor class → table shows RPM/power/torque/NPSHr per size with ★ recommended.
+4. Click a row → printable A4 datasheet (customer fields, performance, specs, options, certifications per vikingpump.com/hygienic).
+5. Excel version: open `wft-selector-lobe-revolution.xlsx`, enter duty on the selector sheet, use the Datasheet tab.
