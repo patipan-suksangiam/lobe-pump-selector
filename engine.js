@@ -144,6 +144,7 @@ function calcAll(inputs){
   const recommended = std.find(r => r.ok);
   return {
     env: { flow, bar, barISF, cP, hpUnits, flowUnit: inputs.flowUnit, presUnit: inputs.presUnit },
+    slipAtP: (f, cls, P) => { const v = viscMultFlow(cP); return cls === 'hot' ? slipHot(f, P, P, v) : slipStd(f, P, v); },
     std, hot, recommended: recommended ? recommended.size : null,
   };
 }
@@ -193,10 +194,10 @@ function cppCalc(inputs){
   const { flow, bar, barISF, cP, hpUnits } = env;
   const vm = cP >= 400 ? 0 : cP > 90 ? (-0.01275*cP + 5.0968)/100 : cP >= 1 ? -0.42*Math.pow(L(cP), 0.55) + 1 : NaN;
   const evalPoly = (coeffs, x) => { let t = 0; for (const e in coeffs) t += coeffs[e] * Math.pow(x, +e); return t; };
-  const slipStd = f => evalPoly(barISF < f.slip.thr ? f.slip.lo : f.slip.hi, barISF) * vm;
-  const addSlip = (f, lo, hi) => ((hi - lo) * barISF / f.maxPres) + lo;
+  const slipStd = (f, p) => evalPoly(p < f.slip.thr ? f.slip.lo : f.slip.hi, p) * vm;
+  const addSlip = (f, lo, hi, p) => ((hi - lo) * p / f.maxPres) + lo;
   const CLS_PFX = { ff:'ff', hot:'ht', choc:'ch' };
-  const slipOf = (f, cls) => cls === 'std' ? slipStd(f) : slipStd(f) + addSlip(f, f[CLS_PFX[cls]+'Min'], f[CLS_PFX[cls]+'Max']) * vm;
+  const slipOf = (f, cls, p) => cls === 'std' ? slipStd(f, p) : slipStd(f, p) + addSlip(f, f[CLS_PFX[cls]+'Min'], f[CLS_PFX[cls]+'Max'], p) * vm;
   const npMult = f => {
     const off = f.off, c107 = f.c107, ramp = f.ramp;
     const r108 = ramp * L(cP) + off;
@@ -213,14 +214,14 @@ function cppCalc(inputs){
     const base = { size:f.size, cls, disp:f.disp, portIn:f.portIn, portMm:f.portMm, rotorDia:null,
       maxSpeed:f.maxSpeed, maxPres:f.maxPres, maxTorque:f.maxTorque };
     if (bar > f.maxPres) return { ...base, ok:false, reason:'pressure exceeds max' };
-    const slip = slipOf(f, cls);
+    const slip = slipOf(f, cls, barISF);
     const rpm = (flow + slip)/f.disp;
     if (!(rpm < f.maxSpeed)) return { ...base, ok:false, reason:'rpm exceeds max' };
     const np = npMult(f) * rpm / f.maxSpeed;                 // E111..114 (proportional to rpm)
     const rpmOk = (np < 15) && (rpm <= f.maxSpeed) && (rpm > 0);
     if (!rpmOk) return { ...base, ok:false, reason: np >= 15 ? 'NPSHr > 15 m' : 'rpm <= 0' };
     // torque uses STD-class rpm for every class (source E131 uses E133)
-    const rpmStd = (flow + slipStd(f))/f.disp;
+    const rpmStd = (flow + slipStd(f, barISF))/f.disp;
     const roll = (f.maxSpeed - rpmStd)/f.maxSpeed * f.rollTorque;
     const vp   = f.viscPowF * f.disp * rpmStd/f.maxSpeed * viscPow();
     const tq   = roll + vp + bar * (16.5 * f.disp);
@@ -234,7 +235,7 @@ function cppCalc(inputs){
   const res = {};
   for (const cls of ['std','ff','hot','choc']) res[cls] = CPP_SIZES.map(f => calc(f, cls));
   const rec = res.std.find(r => r.ok);
-  return { env, ...res, recommended: rec ? rec.size : null };
+  return { env, slipAtP: (f, cls, P) => slipOf(f, cls, P), ...res, recommended: rec ? rec.size : null };
 }
 
 // ------------------------------------------------------------
@@ -266,12 +267,12 @@ function mpcpCalc(inputs){
     return v * vm;
   };
   const evalPoly = (coeffs, x) => { let t = 0; for (const e in coeffs) t += coeffs[e] * Math.pow(x, +e); return t; };
-  const slipA = f => {
-    const s = evalPoly(barISF < f.slip.thr ? f.slip.lo : f.slip.hi, barISF) * f.margin * vm;
+  const slipA = (f, p) => {
+    const s = evalPoly(p < f.slip.thr ? f.slip.lo : f.slip.hi, p) * f.margin * vm;
     return (f.slip.rv && rv) ? s + rvFlowVar(f) : s;
   };
-  const slipB = f => slipA(f) + (((f.bMax - f.bMin) * barISF / f.maxPres) + f.bMin) * vm;
-  const slipC = f => slipA(f) + (((f.cMax - f.cMin) * barISF / f.maxPres) + f.cMin) * vm;
+  const slipB = (f, p) => slipA(f, p) + (((f.bMax - f.bMin) * p / f.maxPres) + f.bMin) * vm;
+  const slipC = (f, p) => slipA(f, p) + (((f.cMax - f.cMin) * p / f.maxPres) + f.cMin) * vm;
   const npA = (f, rpm) => ((f.np1/(f.portDia*f.portDia)) * (rpm+300)**2 * (cP**0.8 * (f.portDia**-1.2*0.0047) + 0.01)) + 1.3;
   const corner = f => bar < f.maxPresAtMaxS ? f.maxSpeed : f.maxSpeed - (f.maxSpeed - f.maxSpeedAtMaxP)*(bar - f.maxPresAtMaxS)/(f.maxPres - f.maxPresAtMaxS);
   const powerKw = (f, rpm) => ((1.9*bar + f.p110) * rpm * f.disp/1000) + ((Math.pow(Math.log10(cP), 3) * f.logK) * rpm * f.disp/1000);
@@ -284,7 +285,7 @@ function mpcpCalc(inputs){
     if ((cls === 'b' && !f.bMin && !f.bMax) || (cls === 'c' && !f.cMin && !f.cMax))
       return { ...base, ok:false, reason:'rotor class not offered' };
     if (bar > f.maxPres) return { ...base, ok:false, reason:'pressure exceeds max' };
-    const slip = cls === 'a' ? slipA(f) : cls === 'b' ? slipB(f) : slipC(f);
+    const slip = cls === 'a' ? slipA(f, barISF) : cls === 'b' ? slipB(f, barISF) : slipC(f, barISF);
     if (Number.isNaN(slip)) return { ...base, ok:false, reason:'slip N/A' };
     const rpm = (flow + slip)/f.disp;
     if (!(rpm < f.maxSpeed)) return { ...base, ok:false, reason:'rpm exceeds max' };
@@ -312,7 +313,7 @@ function mpcpCalc(inputs){
   b.forEach((s,i)=>{ if(s.ok && a[i].ok) s.tip = Math.PI*MPCP_SIZES[i].rotorDia/1000*a[i].rpm/60; });
   c.forEach((s,i)=>{ if(s.ok && a[i].ok) s.tip = Math.PI*MPCP_SIZES[i].rotorDia/1000*a[i].rpm/60; });
   const rec = a.find(r => r.ok);
-  return { env, std:a, b, c, recommended: rec ? rec.size : null };
+  return { env, slipAtP: (f, cls, P) => cls === 'a' ? slipA(f, P) : cls === 'b' ? slipB(f, P) : slipC(f, P), std:a, b, c, recommended: rec ? rec.size : null };
 }
 
 // ------------------------------------------------------------
@@ -352,9 +353,9 @@ function sterilobeCalc(inputs){
     for (const e in coeffs) s += coeffs[e] * Math.pow(x, +e);
     return s;
   };
-  const slipForm = (f, form) => {
+  const slipForm = (f, form, p) => {
     const cfg = f[form === 'b' ? 'bw' : 'ml'];
-    const x = barISF;
+    const x = p;
     const lo = x < cfg.thr;
     const base = evalPoly(lo ? cfg.lo : cfg.hi, x) * f.margin * vm;
     const slip = lo && cfg.loD ? base * f.margin * vm : base;   // source quirk: lo branch x2
@@ -376,9 +377,9 @@ function sterilobeCalc(inputs){
     if (form === 'm' && !f.ml) return { ...base, ok:false, reason:'rotor form not offered' };
     if (bar > f.maxPres) return { ...base, ok:false, reason:'pressure exceeds max' };
     // source quirk: multilobe validity checks BiWing slip, result uses Multilobe slip
-    const chk = slipForm(f, 'b');
+    const chk = slipForm(f, 'b', barISF);
     const rpmChk = (flow + chk)/f.disp;
-    const slip = slipForm(f, form);
+    const slip = slipForm(f, form, barISF);
     const rpm = (flow + slip)/f.disp;
     if (!(rpmChk < f.maxSpeed)) return { ...base, ok:false, reason:'rpm exceeds max' };
     const np = npshr(f, rpm);
@@ -397,7 +398,7 @@ function sterilobeCalc(inputs){
   const multilobe = STERILOBE_SIZES.map(f => calc(f, 'm'));
   biwing.forEach((s,i)=>{ if(s.ok) s.tip = Math.PI*STERILOBE_SIZES[i].rotorDia/1000*s.rpm/60; });
   const rec = biwing.find(r => r.ok);
-  return { env, biwing, multilobe, recommended: rec ? rec.size : null };
+  return { env, slipAtP: (f, form, P) => slipForm(f, form, P), biwing, multilobe, recommended: rec ? rec.size : null };
 }
 
 // ------------------------------------------------------------
@@ -414,11 +415,11 @@ function rtpCalc(inputs){
   const env = envFrom(inputs);
   const { flow, bar, barISF, cP, hpUnits } = env;   // RTP has no ISF input -> barISF unused
   const vm = cP < 1 ? NaN : cP >= 500 ? 0 : (1 - (239*(Math.pow(L(cP),2)*L(500)) - 239)/(239*239)) / 1.035342;
-  const slipF = f => {
+  const slipF = (f, p) => {
     const [a6,a5,a4,a3,a2,a1] = f.p6, [b2,b1,c0] = f.p2;
-    const s = bar < 2
-      ? ((a6*bar**6 + a5*bar**5 - a4*bar**4 + a3*bar**3 - a2*bar**2 + a1*bar) * f.margin * vm)
-      : ((((b2*bar*bar + b1*bar) + c0)) * f.margin * vm);
+    const s = p < 2
+      ? ((a6*p**6 + a5*p**5 - a4*p**4 + a3*p**3 - a2*p**2 + a1*p) * f.margin * vm)
+      : ((((b2*p*p + b1*p) + c0)) * f.margin * vm);
     return s;
   };
   const npshBase = f => cP < 100 ? f.np[0]*cP + f.np[1] : f.np[2]*cP**f.np[3];
@@ -432,7 +433,7 @@ function rtpCalc(inputs){
     const base = { size:f.size, cls:'std', disp:f.disp, portIn:f.portIn, portMm:f.portMm, rotorDia:f.rotorDia,
       maxSpeed:f.maxSpeed, maxPres:f.maxPres, maxTorque:f.maxTorque };
     if (bar > f.maxPres) return { ...base, ok:false, reason:'pressure exceeds max' };
-    const slip = slipF(f);
+    const slip = slipF(f, bar);
     const rpm = (flow + slip)/f.disp;
     if (!(rpm < f.maxSpeed)) return { ...base, ok:false, reason:'rpm exceeds max' };
     const np = npshr(f, rpm);
@@ -449,9 +450,8 @@ function rtpCalc(inputs){
   const std = RTP_SIZES.map(f => calc(f));
   std.forEach((s,i)=>{ if(s.ok) s.tip = Math.PI*RTP_SIZES[i].rotorDia/1000*s.rpm/60; });
   const rec = std.find(r => r.ok);
-  return { env, std, recommended: rec ? rec.size : null };
+  return { env, slipAtP: (f, cls, P) => slipF(f, P), std, recommended: rec ? rec.size : null };
 }
-
 // ------------------------------------------------------------
 // 6) ACCULOBE — Lobe / Wing rotors, dual-port NPSHr
 // ------------------------------------------------------------
@@ -470,10 +470,10 @@ function acculobeCalc(inputs){
   const flushed = inputs.flushed !== 'No';                    // D12 default Yes? (source: 'No' -> 1750 rpm)
   const maxSpeed = inputs.flushed === 'No' ? 1750 : 800;
   const vm = cP < 1 ? NaN : cP >= 170 ? 0 : ((-23.7*(L(cP)/5.136)) + 23.7) / 23.7;
-  const slipF = f => {
+  const slipF = (f, p) => {
     const [a5,a4,a3,a2,a1] = f.p5;
     // source quirk: margin multiplies only the linear term, and there is no whole-expression margin
-    return ((a5*barISF**5 - a4*barISF**4 + a3*barISF**3 - a2*barISF**2 + a1*barISF) * f.margin) * vm;
+    return ((a5*p**5 - a4*p**4 + a3*p**3 - a2*p**2 + a1*p) * f.margin) * vm;
   };
   const npshBase = (np, x) => cP < 100 ? np[0]*cP + np[1] : np[2]*cP**np[3];
   const npshAt = (np, rpm) => np[4]*rpm**3 + np[5]*rpm**2 + np[6]*rpm + npshBase(np, rpm);
@@ -486,7 +486,7 @@ function acculobeCalc(inputs){
     const base = { size:f.size, cls:'std', disp:f.disp, portIn:f.portIn, portMm:f.portMm, rotorDia:f.rotorDia,
       maxSpeed, maxPres:f.maxPres, maxTorque:f.maxTorque };
     if (bar > f.maxPres) return { ...base, ok:false, reason:'pressure exceeds max' };
-    const slip = slipF(f);
+    const slip = slipF(f, bar);
     const rpm = (flow + slip)/f.disp;
     if (!(rpm < maxSpeed)) return { ...base, ok:false, reason:'rpm exceeds max' };
     const np12 = npshr(f.np12, rpm), np34 = npshr(f.np34, rpm);
@@ -504,20 +504,42 @@ function acculobeCalc(inputs){
   const std = ACCULOBE_SIZES.map(f => calc(f));
   std.forEach((s,i)=>{ if(s.ok) s.tip = Math.PI*ACCULOBE_SIZES[i].rotorDia/1000*s.rpm/60; });
   const rec = std.find(r => r.ok);
-  return { env, std, recommended: rec ? rec.size : null };
+  return { env, slipAtP: (f, cls, P) => slipF(f, P), std, recommended: rec ? rec.size : null };
 }
-
 // ------------------------------------------------------------
 // registry + dispatcher
 // ------------------------------------------------------------
 const ENGINES = {
-  'Revolution RLP':  { calc: inputs => calcAll(inputs), classes: [{key:'std',label:'Standard / 70°C'},{key:'hot',label:'Hot / 150°C'}] },
-  'Revolution CPP':  { calc: cppCalc,       classes: [{key:'std',label:'Std / 93°C'},{key:'ff',label:'FF / 105°C'},{key:'hot',label:'Hot / 150°C'},{key:'choc',label:'Choc / refer WFT'}] },
-  'MP-CP':           { calc: mpcpCalc,      classes: [{key:'a',label:'Class A / 70°C'},{key:'b',label:'Class B / 100°C'},{key:'c',label:'Class C / 150°C'}] },
-  'Sterilobe':       { calc: sterilobeCalc, classes: [{key:'b',label:'BiWing / 150°C'},{key:'m',label:'Multilobe / 150°C'}], rowKeys:{b:'biwing',m:'multilobe'} },
-  'RTP':             { calc: rtpCalc,       classes: [{key:'std',label:'Standard'}] },
-  'Acculobe':        { calc: acculobeCalc,  classes: [{key:'std',label:'Standard'}] },
+  'Revolution RLP':  { calc: inputs => calcAll(inputs), sizes: SIZE_DATA, classes: [{key:'std',label:'Standard / 70°C'},{key:'hot',label:'Hot / 150°C'}] },
+  'Revolution CPP':  { calc: cppCalc,       sizes: CPP_SIZES, classes: [{key:'std',label:'Std / 93°C'},{key:'ff',label:'FF / 105°C'},{key:'hot',label:'Hot / 150°C'},{key:'choc',label:'Choc / refer WFT'}] },
+  'MP-CP':           { calc: mpcpCalc,      sizes: MPCP_SIZES, classes: [{key:'a',label:'Class A / 70°C'},{key:'b',label:'Class B / 100°C'},{key:'c',label:'Class C / 150°C'}], rowKeys:{a:'std'} },
+  'Sterilobe':       { calc: sterilobeCalc, sizes: STERILOBE_SIZES, classes: [{key:'b',label:'BiWing / 150°C'},{key:'m',label:'Multilobe / 150°C'}], rowKeys:{b:'biwing',m:'multilobe'} },
+  'RTP':             { calc: rtpCalc,       sizes: RTP_SIZES, classes: [{key:'std',label:'Standard'}] },
+  'Acculobe':        { calc: acculobeCalc,  sizes: ACCULOBE_SIZES, classes: [{key:'std',label:'Standard'}] },
 };
+
+// Performance-curve points: flow vs pressure at the DUTY rpm (Q = rpm*disp - slip(P)).
+function curveData(seriesKey, sizeKey, clsKey, inputs){
+  const eng = ENGINES[seriesKey];
+  if (!eng) return null;
+  const res = eng.calc(inputs);
+  if (!res.slipAtP) return null;
+  const size = eng.sizes.find(s => s.size === sizeKey);
+  if (!size) return null;
+  const rk = (eng.rowKeys && eng.rowKeys[clsKey]) || clsKey;
+  const row = (res[rk] || []).find(r => r && r.size === sizeKey);
+  if (!row || !row.ok || row.rpm == null || isNaN(row.rpm)) return null;
+  const maxP = row.maxPres != null ? row.maxPres : 0;
+  const step = maxP <= 8 ? 0.25 : 0.5;
+  const pts = [];
+  for (let P = 0; P <= maxP + 1e-9; P += step){
+    let slip = null;
+    try { slip = res.slipAtP(size, clsKey, P); } catch (e) { slip = null; }
+    if (slip == null || isNaN(slip)) continue;
+    pts.push({ P: Math.round(P*1000)/1000, q: Math.max(0, row.rpm * row.disp - slip) });
+  }
+  return { pts, dutyP: res.env ? res.env.bar : 0, dutyQ: res.env ? res.env.flow : 0, maxP, rpm: row.rpm };
+}
 
 function calcSeries(seriesKey, inputs){
   const eng = ENGINES[seriesKey];
@@ -528,5 +550,5 @@ function calcSeries(seriesKey, inputs){
   return { env: r.env, rows, recommended: r.recommended, classes: eng.classes };
 }
 
-if (typeof module !== 'undefined') module.exports = { ...module.exports, calcSeries, ENGINES, CPP_SIZES, MPCP_SIZES, STERILOBE_SIZES, RTP_SIZES, ACCULOBE_SIZES };
-if (typeof window !== 'undefined') window.RLPEngine = { ...window.RLPEngine, calcSeries, ENGINES };
+if (typeof module !== 'undefined') module.exports = { ...module.exports, calcSeries, curveData, ENGINES, CPP_SIZES, MPCP_SIZES, STERILOBE_SIZES, RTP_SIZES, ACCULOBE_SIZES };
+if (typeof window !== 'undefined') window.RLPEngine = { ...window.RLPEngine, calcSeries, curveData, ENGINES };
