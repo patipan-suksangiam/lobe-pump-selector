@@ -68,7 +68,7 @@ function App(){
   const rows = (res && res.rows[clsKey]) || [];
   const hp = (flowUnit === 'gpm' || flowUnit === 'usgpm');
   const selRow = sel ? rows.find(r => r.size === sel) : null;
-  const curve = React.useMemo(() => (selRow && selRow.ok && RLP.curveData) ? RLP.curveData(series, selRow.size, clsKey, inputs) : null,
+  const curve = React.useMemo(() => (selRow && selRow.ok && RLP.speedCurve) ? RLP.speedCurve(series, selRow.size, clsKey, inputs) : null,
     [series, clsKey, selRow, flow, flowUnit, pres, presUnit, visc, viscUnit, isf, rv, flushed]);
   const qScale = (flowUnit === 'gpm') ? 4.546092 : (flowUnit === 'usgpm') ? 3.785412 : 1;
   const dateStr = new Date().toLocaleDateString('en-GB');
@@ -224,38 +224,46 @@ function App(){
       <tr><td colSpan="6" style={{fontSize:8,color:'#666',fontStyle:'italic'}}>Values auto-calculated per the WFT selector. Confirm final selection with Viking Pump Hygienic Ltd.</td></tr>
       </tbody>
     </table>
-    {curve && curve.pts.length > 1 && (() => {
-      const W=700,H=260,PL=52,PR=18,PT=14,PB=38;
-      const qMax = Math.max(...curve.pts.map(p=>p.q), curve.dutyQ) * 1.12 || 1;
-      const X = p => PL + (p/curve.maxP)*(W-PL-PR);
+    {curve && curve.lines && curve.lines.length > 1 && (() => {
+      const W=700,H=300,PL=58,PR=20,PT=14,PB=42;
+      const qMax = Math.max(...curve.lines.map(l=>l.pts[l.pts.length-1].q), curve.dutyQ) * 1.06 || 1;
+      const X = r => PL + (r/curve.maxSpeed)*(W-PL-PR);
       const Y = q => PT + (1 - q/qMax)*(H-PT-PB);
-      const path = curve.pts.map((p,i)=>(i?'L':'M')+X(p.P).toFixed(1)+' '+Y(p.q/qScale).toFixed(1)).join(' ');
-      const gridP = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].filter(p=>p<=curve.maxP);
+      const colorOf = ln => ln.P === 0 ? '#2e75b6' : ln.P === curve.dutyP ? '#1f4e79' : '#c00000';
+      const gridR = [0,0.2,0.4,0.6,0.8,1].map(f=>f*curve.maxSpeed);
       const gridQ = [0,0.25,0.5,0.75,1].map(f=>f*qMax);
       return (
       <div className="mt-3" style={{border:'1px solid #ccc',borderRadius:8,padding:10,background:'#fff'}}>
-        <div className="text-sm font-semibold" style={{color:'#1f4e79'}}>Performance Curve — Flow vs Pressure at duty speed ({fnum(selRow.rpm,0)} rpm)</div>
+        <div className="text-sm font-semibold" style={{color:'#1f4e79'}}>Performance Curve — Flow vs Pump Speed (0 – {fnum(curve.maxSpeed,0)} rpm)</div>
         <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{maxWidth:W}}>
           {gridQ.map(q=>(
             <g key={'gq'+q}>
-              <line x1={X(0)} y1={Y(q)} x2={X(curve.maxP)} y2={Y(q)} stroke="#e8e8e8" strokeWidth="1"/>
+              <line x1={X(0)} y1={Y(q)} x2={X(curve.maxSpeed)} y2={Y(q)} stroke="#e8e8e8" strokeWidth="1"/>
               <text x={PL-6} y={Y(q)+3} fontSize="10" fill="#666" textAnchor="end">{fnum(q/qScale, qMax>200?0:1)}</text>
             </g>))}
-          {gridP.map(p=>(
-            <g key={'gp'+p}>
-              <line x1={X(p)} y1={Y(0)} x2={X(p)} y2={Y(qMax)} stroke="#e8e8e8" strokeWidth="1"/>
-              <text x={X(p)} y={H-16} fontSize="10" fill="#666" textAnchor="middle">{p}</text>
+          {gridR.map(r=>(
+            <g key={'gr'+r}>
+              <line x1={X(r)} y1={Y(0)} x2={X(r)} y2={Y(qMax)} stroke="#e8e8e8" strokeWidth="1"/>
+              <text x={X(r)} y={H-18} fontSize="10" fill="#666" textAnchor="middle">{fnum(r,0)}</text>
             </g>))}
           <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(qMax)} stroke="#555" strokeWidth="1.5"/>
-          <line x1={X(0)} y1={Y(0)} x2={X(curve.maxP)} y2={Y(0)} stroke="#555" strokeWidth="1.5"/>
-          <polyline points={path} fill="none" stroke="#1f4e79" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
-          {curve.pts.filter((_,i)=>i%2===0).map((p,i)=>(
-            <circle key={'pt'+i} cx={X(p.P)} cy={Y(p.q/qScale)} r="3" fill="#1f4e79" stroke="#fff" strokeWidth="1"/>
-          ))}
-          <circle cx={X(curve.dutyP)} cy={Y(curve.dutyQ/qScale)} r="6" fill="#c00000" stroke="#fff" strokeWidth="2"/>
-          <text x={X(curve.dutyP)+8} y={Y(curve.dutyQ/qScale)-8} fontSize="11" fontWeight="bold" fill="#c00000">Duty point ({fnum(curve.dutyP,1)} bar, {fnum(curve.dutyQ/qScale,1)} {flowUnit==='l/m'?'l/min':flowUnit})</text>
+          <line x1={X(0)} y1={Y(0)} x2={X(curve.maxSpeed)} y2={Y(0)} stroke="#555" strokeWidth="1.5"/>
+          {curve.lines.map((ln,li)=>{
+            const path = ln.pts.map((p,i)=>(i?'L':'M')+X(p.rpm).toFixed(1)+' '+Y(p.q/qScale).toFixed(1)).join(' ');
+            const isDuty = ln.P === curve.dutyP;
+            return <polyline key={'ln'+li} points={path} fill="none" stroke={colorOf(ln)} strokeWidth={isDuty?3.5:2.2} strokeLinecap="round" strokeLinejoin="round"/>;
+          })}
+          <circle cx={X(curve.dutyRpm)} cy={Y(curve.dutyQ/qScale)} r="6" fill="#c00000" stroke="#fff" strokeWidth="2"/>
+          <text x={X(curve.dutyRpm)+8} y={Y(curve.dutyQ/qScale)-8} fontSize="11" fontWeight="bold" fill="#c00000">Duty point ({fnum(curve.dutyRpm,0)} rpm, {fnum(curve.dutyQ/qScale,1)} {flowUnit==='l/m'?'l/min':flowUnit})</text>
+          <text x={PL+((W-PL-PR)/2)} y={H-2} fontSize="10" fill="#333" fontWeight="bold" textAnchor="middle">Pump Speed (rpm)</text>
+          <text x={12} y={PT+((H-PT-PB)/2)} fontSize="10" fill="#333" fontWeight="bold" transform={`rotate(-90 12 ${PT+((H-PT-PB)/2)})`} textAnchor="middle">Flow ({flowUnit==='l/m'?'l/min':flowUnit})</text>
         </svg>
-        <div className="text-xs text-gray-500">Flow ({flowUnit==='l/m'?'l/min':flowUnit}) vs Pressure (bar) at the duty speed — Q = rpm × displacement − slip(P). Red dot = duty point.</div>
+        <div className="text-xs" style={{color:'#555'}}>
+          {curve.lines.map((ln,i)=>(
+            <span key={'lg'+i} style={{marginRight:14}}><span style={{display:'inline-block',width:22,height:3,background:colorOf(ln),verticalAlign:'middle',marginRight:5}}/>{ln.P===0?'0 bar':ln.P===curve.dutyP?fnum(ln.P,1)+' bar (duty)':ln.P===curve.maxP?fnum(ln.P,1)+' bar (max)':fnum(ln.P,1)+' bar'}</span>
+          ))}
+          <span>● <b style={{color:'#c00000'}}>duty point</b></span> — Q = rpm × displacement − slip(P), at {fnum(selRow.rpm,0)} rpm / {curve.lines.find(l=>l.P===curve.dutyP) ? fnum(curve.lines.find(l=>l.P===curve.dutyP).slip,1) : '?'} l/min slip
+        </div>
       </div>);
     })()}
     <div style={{marginTop:14,paddingTop:8,borderTop:'2px solid #1f4e79',fontSize:11,color:'#333'}}>

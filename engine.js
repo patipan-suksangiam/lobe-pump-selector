@@ -541,6 +541,38 @@ function curveData(seriesKey, sizeKey, clsKey, inputs){
   return { pts, dutyP: res.env ? res.env.bar : 0, dutyQ: res.env ? res.env.flow : 0, maxP, rpm: row.rpm };
 }
 
+// Q-N curve: flow vs pump speed (0..max speed) at several pressures.
+// Lines: q(rpm) = rpm*disp - slip(P)  — the duty-pressure line passes through the duty point.
+function speedCurve(seriesKey, sizeKey, clsKey, inputs){
+  const eng = ENGINES[seriesKey];
+  if (!eng) return null;
+  const res = eng.calc(inputs);
+  if (!res.slipAtP) return null;
+  const size = eng.sizes.find(s => s.size === sizeKey);
+  if (!size) return null;
+  const rk = (eng.rowKeys && eng.rowKeys[clsKey]) || clsKey;
+  const row = (res[rk] || []).find(r => r && r.size === sizeKey);
+  if (!row || !row.ok || row.rpm == null || isNaN(row.rpm)) return null;
+  const maxSpeed = row.maxSpeed != null ? row.maxSpeed : (size.maxSpeed || 0);
+  const disp = row.disp != null ? row.disp : size.disp;
+  const dutyP = res.env ? res.env.bar : 0;
+  const maxP = row.maxPres != null ? row.maxPres : (size.maxPres || 0);
+  const Ps = [0, dutyP, maxP].filter((v, i, a) => v != null && !isNaN(v) && a.indexOf(v) === i).sort((a, b) => a - b);
+  const N = 25;
+  const lines = Ps.map(P => {
+    let slip = 0;
+    try { slip = res.slipAtP(size, clsKey, P); } catch (e) { slip = 0; }
+    if (slip == null || isNaN(slip)) slip = 0;
+    const pts = [];
+    for (let i = 0; i <= N; i++) {
+      const rpm = maxSpeed * i / N;
+      pts.push({ rpm: Math.round(rpm * 100) / 100, q: Math.max(0, rpm * disp - slip) });
+    }
+    return { P: Math.round(P * 1000) / 1000, slip: Math.round(slip * 1000) / 1000, pts };
+  });
+  return { maxSpeed, disp, lines, dutyP, dutyQ: res.env ? res.env.flow : 0, dutyRpm: Math.round(row.rpm * 100) / 100 };
+}
+
 function calcSeries(seriesKey, inputs){
   const eng = ENGINES[seriesKey];
   if (!eng) return null;
@@ -550,5 +582,5 @@ function calcSeries(seriesKey, inputs){
   return { env: r.env, rows, recommended: r.recommended, classes: eng.classes };
 }
 
-if (typeof module !== 'undefined') module.exports = { ...module.exports, calcSeries, curveData, ENGINES, CPP_SIZES, MPCP_SIZES, STERILOBE_SIZES, RTP_SIZES, ACCULOBE_SIZES };
-if (typeof window !== 'undefined') window.RLPEngine = { ...window.RLPEngine, calcSeries, curveData, ENGINES };
+if (typeof module !== 'undefined') module.exports = { ...module.exports, calcSeries, curveData, speedCurve, ENGINES, CPP_SIZES, MPCP_SIZES, STERILOBE_SIZES, RTP_SIZES, ACCULOBE_SIZES };
+if (typeof window !== 'undefined') window.RLPEngine = { ...window.RLPEngine, calcSeries, curveData, speedCurve, ENGINES };
