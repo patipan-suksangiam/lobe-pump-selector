@@ -34,7 +34,7 @@
     body { background:#fff; color:#000; }
     .app { display:none !important; }
     .ds { display:block !important; box-shadow:none; padding:0; }
-    @page { size:A4 landscape; margin:10mm; }
+    @page { size:A4 portrait; margin:10mm; }
   }
 </style>
 </head>
@@ -249,9 +249,9 @@ function App(){
           <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(qMax)} stroke="#555" strokeWidth="1.5"/>
           <line x1={X(0)} y1={Y(0)} x2={X(curve.maxSpeed)} y2={Y(0)} stroke="#555" strokeWidth="1.5"/>
           {curve.lines.map((ln,li)=>{
-            const path = ln.pts.map((p,i)=>(i?'L':'M')+X(p.rpm).toFixed(1)+' '+Y(p.q/qScale).toFixed(1)).join(' ');
+            const d = ln.pts.map((p,i)=>(i?'L':'M')+X(p.rpm).toFixed(1)+' '+Y(p.q/qScale).toFixed(1)).join(' ');
             const isDuty = ln.P === curve.dutyP;
-            return <polyline key={'ln'+li} points={path} fill="none" stroke={colorOf(ln)} strokeWidth={isDuty?3.5:2.2} strokeLinecap="round" strokeLinejoin="round"/>;
+            return <path key={'ln'+li} d={d} fill="none" stroke={colorOf(ln)} strokeWidth={isDuty?3.5:2.2} strokeLinecap="round" strokeLinejoin="round"/>;
           })}
           <circle cx={X(curve.dutyRpm)} cy={Y(curve.dutyQ/qScale)} r="6" fill="#c00000" stroke="#fff" strokeWidth="2"/>
           <text x={X(curve.dutyRpm)+8} y={Y(curve.dutyQ/qScale)-8} fontSize="11" fontWeight="bold" fill="#c00000">Duty point ({fnum(curve.dutyRpm,0)} rpm, {fnum(curve.dutyQ/qScale,1)} {flowUnit==='l/m'?'l/min':flowUnit})</text>
@@ -268,7 +268,7 @@ function App(){
     })()}
     <div style={{marginTop:14,paddingTop:8,borderTop:'2px solid #1f4e79',fontSize:11,color:'#333'}}>
       <b>Siamraj Public Company Limited</b> — Authorized distributor of Viking Pump Hygienic (formerly WFT)<br/>
-      <span style={{fontSize:10,color:'#666'}}>www.siamrajplc.com · patipan@siamrajplc.com · <b style={{color:'#c00000'}}>v3.0 — Q-N curve (X: Pump Speed)</b></span>
+      <span style={{fontSize:10,color:'#666'}}>www.siamrajplc.com · patipan@siamrajplc.com · <b style={{color:'#c00000'}}>v3.1 — Q-N curve fixed (X: Pump Speed, A4 portrait)</b></span>
     </div>
     <button onClick={()=>window.print()} className="mt-3 px-4 py-2 rounded font-semibold" style={{background:'#1f4e79',color:'#fff'}}>🖨 Print Datasheet</button>
   </div>
