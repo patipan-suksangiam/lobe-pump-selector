@@ -701,7 +701,7 @@ function App(){
             const c = colMap(r);
             const isRec = r.size === res.recommended;
             return <tr key={r.size} className={`${isRec?'rec':''} ${!r.ok?'bad':''} ${sel===r.size?'sel':''}`} onClick={()=>{ if(r.ok) setSel(r.size); }}>
-              <td className="l font-semibold">{r.size} {isRec && <span className="badge">★REC</span>}</td>
+              <td className="l font-semibold">{series==='MP-CP' ? 'MP'+r.size : r.size} {isRec && <span className="badge">★REC</span>}</td>
               <td>{c.disp}</td><td>{c.portIn}</td>
               <td style={{fontWeight:600}}>{c.rpm}</td><td>{c.power}</td><td>{c.torque}</td>
               <td>{r.npshr !== undefined ? c.npshr : (r.npshr34 !== undefined ? c.npshr34 : c.npshr12)}</td>
@@ -746,7 +746,7 @@ function App(){
         <td style={{background:'#f2f2f2'}}><b>Improved Surface Finish</b></td><td>{isf?'Yes':'No'}</td>
         <td style={{background:'#f2f2f2'}}><b>Relief Valve / Flushed</b></td><td>{series==='Acculobe' ? flushed : (rv?'Yes':'No')}</td>
       </tr>
-      <tr><th colSpan="6" style={{background:'#d9d9d9'}}>2 • SELECTED PUMP — {selRow.size} ({eng.classes.find(c=>c.key===clsKey).label})</th></tr>
+      <tr><th colSpan="6" style={{background:'#d9d9d9'}}>2 • SELECTED PUMP — {series==='MP-CP' ? 'MP'+selRow.size : selRow.size} ({eng.classes.find(c=>c.key===clsKey).label})</th></tr>
       <tr>
         <td style={{background:'#f2f2f2'}}><b>Pump Speed</b></td><td>{colMap(selRow).rpm} rpm</td>
         <td style={{background:'#f2f2f2'}}><b>Power Required</b></td><td>{colMap(selRow).power} {hp?'HP':'kW'}</td>
